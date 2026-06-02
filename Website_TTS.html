@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🔊 Text Vorleser Pro</title>
+    <style>
+        /* Modernes, responsives Design für PC und Smartphone */
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f0f2f5;
+            margin: 0;
+            padding: 15px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            box-sizing: border-box;
+        }
+        .container {
+            background-color: white;
+            padding: 25px;
+            border-radius: 16px;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.08);
+            max-width: 600px;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        h1 {
+            color: #1a1a1a;
+            font-size: 24px;
+            margin-top: 0;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        textarea {
+            width: 100%;
+            height: 200px;
+            padding: 12px;
+            border: 1px solid #ccd0d5;
+            border-radius: 10px;
+            font-size: 16px;
+            resize: vertical;
+            box-sizing: border-box;
+            margin-bottom: 15px;
+            transition: border-color 0.2s;
+        }
+        textarea:focus {
+            border-color: #007bff;
+            outline: none;
+        }
+        .button-group {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        button {
+            padding: 12px 8px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            background: #007bff;
+            color: white;
+            font-size: 14px;
+            font-weight: 600;
+            transition: background 0.2s, transform 0.1s;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:active {
+            transform: scale(0.97);
+        }
+        /* Highlight für den Export-Button */
+        button.export-btn {
+            background: #28a745;
+        }
+        button.export-btn:hover {
+            background: #218838;
+        }
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        select {
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid #ccd0d5;
+            font-size: 15px;
+            background-color: #fff;
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>🔊 Text Vorleser Pro</h1>
+
+    <textarea id="text" placeholder="Hier deinen Text eingeben..."></textarea>
+    
+    <div class="button-group">
+        <button onclick="vorlesen()">▶ Vorlesen</button>
+        <button onclick="pauseAudio()">⏸ Pause</button>
+        <button onclick="weiter()">⏯ Weiter</button>
+        <button onclick="stopAudio()">⏹ Stop</button>
+        <button onclick="mp3Export()" class="export-btn">💾 MP3 Export</button>
+    </div>
+
+    <div class="control-group">
+        <label for="stimme"><strong>Stimme auswählen:</strong></label>
+        <select id="stimme"></select>
+    </div>
+</div>
+
+<script>
+let synth = window.speechSynthesis;
+let keepAliveTimer;
+
+// Stimmen laden und in das Dropdown einfügen
+function ladeStimmen() {
+    if (!synth) return;
+    const stimmen = synth.getVoices();
+    const auswahl = document.getElementById('stimme');
+    
+    // Die aktuell ausgewählte Stimme über ihren eindeutigen NAMEN sichern
+    const bisherAusgewaehlterName = auswahl.value;
+
+    auswahl.innerHTML = '';
+
+    // Falls die Stimmen noch asynchron vom Browser geladen werden
+    if (stimmen.length === 0) {
+        const option = document.createElement('option');
+        option.value = "";
+        option.textContent = "⏳ Stimmen werden geladen...";
+        auswahl.appendChild(option);
+        return;
+    }
+
+    stimmen.forEach((stimme) => {
+        const option = document.createElement('option');
+        // Wir nutzen den Namen als eindeutigen Schlüssel statt des instabilen Indexes
+        option.value = stimme.name;
+        option.textContent = `${stimme.name} (${stimme.lang})`;
+        auswahl.appendChild(option);
+    });
+    
+    // Vorherige Auswahl wiederherstellen falls vorhanden
+    if (bisherAusgewaehlterName && stimmen.some(s => s.name === bisherAusgewaehlterName)) {
+        auswahl.value = bisherAusgewaehlterName;
+    } else {
+        // Standardmäßig deutsche Stimme bevorzugen
+        const deStimme = stimmen.find(s => s.lang.toLowerCase().startsWith('de'));
+        if (deStimme) {
+            auswahl.value = deStimme.name;
+        } else if (stimmen.length > 0) {
+            auswahl.value = stimmen 0 .name;
+        }
+    }
+}
+
+// 1. Sofort versuchen (für Safari & Firefox, die Stimmen synchron laden)
+ladeStimmen();
+
+// 2. Event-Listener für asynchrones Laden registrieren (für Chrome, Edge & Android)
+if (typeof speechSynthesis !== 'undefined') {
+    if (speechSynthesis.addEventListener) {
+        speechSynthesis.addEventListener('voiceschanged', ladeStimmen);
+    } else if (speechSynthesis.onvoiceschanged !== undefined) {
+        speechSynthesis.onvoiceschanged = ladeStimmen;
+    }
+}
+
+// 3. Fallback-Timer für langsame Mobilgeräte
+setTimeout(ladeStimmen, 100);
+setTimeout(ladeStimmen, 500);
+setTimeout(ladeStimmen, 1500);
+
+// Hilfsfunktion: Teilt langen Text an Satzzeichen in kleinere Abschnitte auf
+function splitTextIntoChunks(text, maxLength) {
+    const regex = /[^.?!,;]+[.?!,;]?/g;
+    let matches = text.match(regex) || [text];
+    let chunks = [];
+    let currentChunk = "";
+
+    matches.forEach(sentence => {
+        sentence = sentence.trim();
+        if ((currentChunk + " " + sentence).length > maxLength) {
+            if (currentChunk) chunks.push(currentChunk);
+            currentChunk = sentence;
+        } else {
+            currentChunk = currentChunk ? currentChunk + " " + sentence : sentence;
+        }
+    });
+    if (currentChunk) chunks.push(currentChunk);
+    return chunks;
+}
+
+// Verhindert, dass Mobilbrowser das Vorlesen nach 15 Sek. stumm schalten
+function runKeepAlive() {
+    if (synth.speaking) {
+        synth.pause();
+        synth.resume();
+        keepAliveTimer = setTimeout(runKeepAlive, 10000);
+    }
+}
+
+function vorlesen() {
+    const text = document.getElementById('text').value.trim();
+    if (!text) return;
+
+    // Sicherheitsnetz für iOS: Falls die Stimmenauswahl noch leer war, jetzt erzwingen
+    const auswahlFeld = document.getElementById('stimme');
+    if (auswahlFeld.options.length <= 1 && auswahlFeld.value === "") {
+        ladeStimmen();
+    }
+
+    stopAudio();
+
+    const stimmen = synth.getVoices();
+    const ausgewaehlterName = auswahlFeld.value;
+    
+    // Stimme über den Namen im Array suchen
+    const ausgewaehlteStimme = stimmen.find(s => s.name === ausgewaehlterName);
+
+    // Text in Abschnitte aufteilen (ca. 150 Zeichen)
+    const chunks = splitTextIntoChunks(text, 150);
+
+    chunks.forEach((chunk, index) => {
+        let utterance = new SpeechSynthesisUtterance(chunk);
+        
+        if (ausgewaehlteStimme) {
+            utterance.voice = ausgewaehlteStimme;
+        }
+        utterance.rate = 1.0;
+        utterance.pitch = 1.0;
+        utterance.volume = 1.0;
+
+        // Nach dem letzten Chunk den Timer stoppen
+        if (index === chunks.length - 1) {
+            utterance.onend = () => {
+                clearTimeout(keepAliveTimer);
+            };
+        }
+        
+        synth.speak(utterance);
+    });
+
+    runKeepAlive();
+}
+
+function pauseAudio() {
+    synth.pause();
+}
+
+function weiter() {
+    synth.resume();
+}
+
+function stopAudio() {
+    clearTimeout(keepAliveTimer);
+    synth.cancel();
+}
+
+// Echter MP3-Download
+async function mp3Export() {
+    const text = document.getElementById('text').value.trim();
+    if (!text) {
+        alert("Bitte gib zuerst einen Text ein.");
+        return;
+    }
+
+    const exportBtn = document.querySelector('.export-btn');
+    const originalText = exportBtn.textContent;
+    exportBtn.textContent = "⏳ Erstelle MP3...";
+    exportBtn.disabled = true;
+
+    try {
+        const stimmen = synth.getVoices();
+        const ausgewaehlterName = document.getElementById('stimme').value;
+        const selectedVoice = stimmen.find(s => s.name === ausgewaehlterName);
+        
+        // Sprache der Stimme extrahieren (z. B. "de" aus "de-DE" oder "de_DE")
+        let langCode = 'de';
+        if (selectedVoice && selectedVoice.lang) {
+            langCode = selectedVoice.lang.replace('_', '-').split('-') 0 .toLowerCase();
+        }
+
+        // Google TTS erlaubt max 150-200 Zeichen pro Chunk
+        const chunks = splitTextIntoChunks(text, 150);
+        const blobParts = [];
+
+        for (let i = 0; i < chunks.length; i++) {
+            const chunk = chunks[i];
+            const googleTtsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=${langCode}&q=${encodeURIComponent(chunk)}`;
+            
+            // Verwende allorigins.win als freien CORS-Proxy
+            const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(googleTtsUrl)}`;
+
+            const response = await fetch(proxyUrl);
+            if (!response.ok) throw new Error("Verbindung zum Audio-Server fehlgeschlagen.");
+            
+            const blob = await response.blob();
+            blobParts.push(blob);
+        }
+
+        // Alle Audio-Teile zu einer einzigen MP3 zusammenfügen
+        const combinedBlob = new Blob(blobParts, { type: 'audio/mp3' });
+        const downloadUrl = URL.createObjectURL(combinedBlob);
+
+        // Download auslösen
+        const link = document.createElement('a');
+        link.href = downloadUrl;
+        link.download = 'vorleser-audio.mp3';
+        document.body.appendChild(link);
+        link.click();
+        
+        document.body.removeChild(link);
+        URL.revokeObjectURL(downloadUrl);
+
+    } catch (error) {
+        console.error(error);
+        alert("Fehler beim MP3-Export: " + error.message);
+    } finally {
+        exportBtn.textContent = originalText;
+        exportBtn.disabled = false;
+    }
+}
+</script>
+
+</body>
+</html>
